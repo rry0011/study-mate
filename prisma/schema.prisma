@@ -14,7 +14,7 @@ enum Role {
 
 model User {
   id        String   @id @default(cuid())
-  schoolId  String   @map("school_id")
+  schoolId  String?   @map("school_id")
   name      String   @map("user_name")
   email     String   @unique
   img_url   String
@@ -93,7 +93,7 @@ model Lesson {
   courseId    String @map("course_id")
   roomId      String @map("room_id")
   period      Int
-  description String
+  description String?
 
   course            Course             @relation(fields: [courseId], references: [id])
   lessonAttendances LessonAttendance[]
@@ -137,6 +137,7 @@ model Assignment {
   id       String   @id @default(cuid())
   courseId String   @map("course_id")
   title    String
+  description String?
   dueAt    DateTime @map("due_at")
 
   course      Course       @relation(fields: [courseId], references: [id])
