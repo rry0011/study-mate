@@ -1,0 +1,289 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  STUDENT
+  INSTRUCTOR
+  ADMIN
+}
+
+model User {
+  id        String   @id @default(cuid())
+  schoolId  String   @map("school_id")
+  name      String   @map("user_name")
+  email     String   @unique
+  img_url   String
+  password  String
+  role      Role     @default(STUDENT)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  instructingCourses  Course[]             @relation("InstructorCourses")
+  enrollments         Enrollment[]
+  lessonAttendances   LessonAttendance[]
+  submissions         Submission[]
+  notifications       Notification[]
+  sentMessages        Message[]            @relation("SentMessages")
+  conversationMembers ConversationMember[]
+  messageReactions    MessageReaction[]
+  readReceipts        ReadReceipt[]
+
+  @@map("users")
+}
+
+model School {
+  id   String @id @default(cuid())
+  name String @unique
+
+  @@map("schools")
+}
+
+model Timetable {
+  id        String @id @default(cuid())
+  schoolId  String @map("school_id")
+  period    Int
+  startTime String @map("start_time")
+  endTime   String @map("end_time")
+
+  @@map("timetables")
+}
+
+model Room {
+  id       String @id @default(cuid())
+  schoolId String @map("school_id")
+  name     String
+  capacity Int
+
+  @@map("rooms")
+}
+
+model Term {
+  id        String @id @default(cuid())
+  schoolId  String @map("school_id")
+  name      String
+  startDate String @map("start_date")
+  endDate   String @map("end_date")
+
+  @@map("terms")
+}
+
+model Course {
+  id           String @id @default(cuid())
+  instructorId String @map("instructor_id")
+  schoolId     String @map("school_id")
+  title        String
+  description  String
+  termId       String @map("term_id")
+
+  instructor    User           @relation("InstructorCourses", fields: [instructorId], references: [id])
+  enrollments   Enrollment[]
+  lessons       Lesson[]
+  assignments   Assignment[]
+  conversations Conversation[]
+
+  @@map("courses")
+}
+
+model Lesson {
+  id          String @id @default(cuid())
+  courseId    String @map("course_id")
+  roomId      String @map("room_id")
+  period      Int
+  description String
+
+  course            Course             @relation(fields: [courseId], references: [id])
+  lessonAttendances LessonAttendance[]
+
+  @@map("lessons")
+}
+
+model Enrollment {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  courseId   String   @map("course_id")
+  enrolledAt DateTime @default(now()) @map("enrolled_at")
+
+  user   User   @relation(fields: [userId], references: [id])
+  course Course @relation(fields: [courseId], references: [id])
+
+  @@unique([userId, courseId])
+  @@map("enrollments")
+}
+
+enum AttendanceStatus {
+  ATTENDANCE
+  ABSENCE
+  AUTHORIZED_ABSENCE
+}
+
+model LessonAttendance {
+  id       String            @id @default(cuid())
+  userId   String            @map("user_id")
+  lessonId String            @map("lesson_id")
+  status   AttendanceStatus?
+
+  user   User   @relation(fields: [userId], references: [id])
+  lesson Lesson @relation(fields: [lessonId], references: [id])
+
+  @@unique([userId, lessonId])
+  @@map("lesson_attendances")
+}
+
+model Assignment {
+  id       String   @id @default(cuid())
+  courseId String   @map("course_id")
+  title    String
+  dueAt    DateTime @map("due_at")
+
+  course      Course       @relation(fields: [courseId], references: [id])
+  submissions Submission[]
+
+  @@map("tasks")
+}
+
+enum SubmissionStatus {
+  PENDING
+  SUBMITTED
+  GRADED
+}
+
+model Submission {
+  id           String           @id @default(cuid())
+  assignmentId String           @map("assignment_id")
+  userId       String           @map("user_id")
+  status       SubmissionStatus @default(PENDING)
+  score        Int?
+  submittedAt  DateTime?        @map("submitted_at")
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@unique([assignmentId, userId])
+  @@map("submissions")
+}
+
+enum NotificationType {
+  ASSIGNMENT
+  MESSAGE
+  ACHIEVEMENT
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  body      String
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+enum ConversationType {
+  DM
+  COURSE_THREAD
+  FORUM
+}
+
+model Conversation {
+  id        String           @id @default(cuid())
+  type      ConversationType
+  title     String?
+  courseId  String?          @map("course_id")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  course   Course?              @relation(fields: [courseId], references: [id])
+  members  ConversationMember[]
+  messages Message[]
+
+  @@map("conversations")
+}
+
+model ConversationMember {
+  id             String    @id @default(cuid())
+  conversationId String    @map("conversation_id")
+  userId         String    @map("user_id")
+  lastReadAt     DateTime? @map("last_read_at")
+  joinedAt       DateTime  @default(now()) @map("joined_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
+  @@index([conversationId, lastReadAt])
+  @@map("conversation_members")
+}
+
+enum ContentType {
+  TEXT
+  IMAGE
+  FILE
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String      @map("conversation_id")
+  senderId       String      @map("sender_id")
+  contentType    ContentType @default(TEXT) @map("content_type")
+  body           String
+  parentId       String?     @map("parent_id")
+  edited         Boolean     @default(false)
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  conversation Conversation       @relation(fields: [conversationId], references: [id])
+  sender       User               @relation("SentMessages", fields: [senderId], references: [id])
+  parent       Message?           @relation("Replies", fields: [parentId], references: [id])
+  replies      Message[]          @relation("Replies")
+  attachments  MessageAttachment[]
+  reactions    MessageReaction[]
+  readReceipts ReadReceipt[]
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model MessageAttachment {
+  id        String @id @default(cuid())
+  messageId String @map("message_id")
+  fileUrl   String @map("file_url")
+  fileType  String @map("file_type")
+  fileSize  Int    @map("file_size")
+
+  message Message @relation(fields: [messageId], references: [id])
+
+  @@map("message_attachments")
+}
+
+model MessageReaction {
+  id        String @id @default(cuid())
+  messageId String @map("message_id")
+  userId    String @map("user_id")
+  emoji     String
+
+  message Message @relation(fields: [messageId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId, emoji])
+  @@map("message_reactions")
+}
+
+model ReadReceipt {
+  id        String   @id @default(cuid())
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  readAt    DateTime @default(now()) @map("read_at")
+
+  message Message @relation(fields: [messageId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@map("read_receipts")
+}
