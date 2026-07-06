@@ -91,7 +91,6 @@ export default function Header({ onMenuClick }: HeaderProps) {
   const [notifOpen, setNotifOpen] = useState(false);
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  // お知らせパネルのアウトサイドクリックで閉じる
   const notifRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!notifOpen) return;
@@ -175,7 +174,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
               whiteSpace: "nowrap",
             }}
           >
-            LearnFlow
+            StudyMate
           </span>
         </Link>
       </div>
