@@ -43,6 +43,8 @@ model School {
   id   String @id @default(cuid())
   name String @unique
 
+  terms Term[]
+
   @@map("schools")
 }
 
@@ -71,6 +73,8 @@ model Term {
   name      String
   startDate String @map("start_date")
   endDate   String @map("end_date")
+
+  school    School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
   @@map("terms")
 }
