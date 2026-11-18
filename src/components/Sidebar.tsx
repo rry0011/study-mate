@@ -86,7 +86,7 @@ type SidebarProps = {
 const adminItems: NavItem[] = [
   {
     label: "ユーザー管理",
-    href: "../users",
+    href: "/admin/users",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -98,11 +98,25 @@ const adminItems: NavItem[] = [
   },
   {
     label: "学校・学期管理",
-    href: "../schools",
+    href: "/admin/schools",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
         <polyline points="9 22 9 12 15 12 15 22" />
+      </svg>
+    ),
+  },
+];
+
+const instructorItems: NavItem[] = [
+  {
+    label: "授業管理",
+    href: "/teacher/lessons",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+        <path d="M8 7h8M8 11h5" />
       </svg>
     ),
   },
@@ -176,6 +190,7 @@ export default function Sidebar({ open, onClose, role }: SidebarProps) {
   }, [pathname]);
 
   const isAdmin = role === "ADMIN";
+  const isInstructor = role === "INSTRUCTOR" || role === "ADMIN";
 
   return (
     <>
@@ -216,6 +231,21 @@ export default function Sidebar({ open, onClose, role }: SidebarProps) {
           {navItems.map((item) => (
             <NavLink key={item.href} item={item} isActive={pathname === item.href} />
           ))}
+
+          {/* 教師メニュー */}
+          {isInstructor && (
+            <div style={{ marginTop: "20px" }}>
+              <div style={{ margin: "0 8px 8px", height: "1px", background: "#E2E8F0" }} />
+              <SectionLabel label="教師メニュー" />
+              {instructorItems.map((item) => (
+                <NavLink
+                  key={item.href}
+                  item={item}
+                  isActive={pathname === item.href || pathname.startsWith(`${item.href}/`)}
+                />
+              ))}
+            </div>
+          )}
 
           {/* 管理者メニュー */}
           {isAdmin && (
