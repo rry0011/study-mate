@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import { prisma } from "@/src/lib/prisma";
 import { requireRole } from "@/src/lib/session";
+import { createCourse } from "./actions";
 
 function formatDate(date: Date) {
   return new Intl.DateTimeFormat("ja-JP", {
@@ -11,8 +13,16 @@ function formatDate(date: Date) {
 
 export default async function TeacherLessonsPage() {
   const session = await requireRole("INSTRUCTOR", "ADMIN");
+  const instructor = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { schoolId: true },
+  });
+  const schoolId = instructor?.schoolId;
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
 
-  const courses = await prisma.course.findMany({
+  const [courses, terms] = await Promise.all([
+    prisma.course.findMany({
     where: session.user.role === "ADMIN"
       ? {}
       : { instructorId: session.user.id },
@@ -36,12 +46,17 @@ export default async function TeacherLessonsPage() {
       },
     },
     orderBy: { title: "asc" },
-  });
+    }),
+    schoolId
+      ? prisma.term.findMany({
+          where: { schoolId, endDate: { gte: today } },
+          orderBy: { startDate: "asc" },
+        })
+      : Promise.resolve([]),
+  ]);
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
 
   const todaysLessons = courses.flatMap((course) =>
     course.lessons
@@ -68,11 +83,65 @@ export default async function TeacherLessonsPage() {
           <p style={{ color: "#64748B", fontSize: 13, marginBottom: 4 }}>教師メニュー</p>
           <h1 style={{ fontSize: 28, color: "#0F172A" }}>授業管理</h1>
         </div>
-        <button type="button" style={primaryButtonStyle}>
+        <a href="#create-course" style={primaryButtonStyle}>
           <span style={{ fontSize: 18 }}>+</span>
           授業を追加
-        </button>
+        </a>
       </div>
+
+      <form
+        id="create-course"
+        action={createCourse}
+        style={{ ...panelStyle, padding: 18, marginBottom: 24 }}
+      >
+        <h2 style={{ fontSize: 18, marginBottom: 14 }}>授業を作成</h2>
+        {terms.length === 0 ? (
+          <p style={{ color: "#64748B" }}>
+            選択できる学期がありません。所属学校の現在または今後の学期を確認してください。
+          </p>
+        ) : (
+          <>
+            <div className="course-create-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+              <label style={fieldLabelStyle}>
+                学期
+                <select name="termId" required style={inputStyle}>
+                  {terms.map((term) => (
+                    <option key={term.id} value={term.id}>{term.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={fieldLabelStyle}>
+                授業名
+                <input name="title" required maxLength={200} style={inputStyle} />
+              </label>
+              <label style={fieldLabelStyle}>
+                基本の曜日
+                <select name="dayOfWeek" required style={inputStyle} defaultValue="1">
+                  {["日", "月", "火", "水", "木", "金", "土"].map((day, index) => (
+                    <option key={day} value={index}>{day}曜日</option>
+                  ))}
+                </select>
+              </label>
+              <label style={fieldLabelStyle}>
+                基本の時限
+                <select name="period" required style={inputStyle} defaultValue="1">
+                  {Array.from({ length: 20 }, (_, index) => (
+                    <option key={index + 1} value={index + 1}>第{index + 1}時限</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ ...fieldLabelStyle, gridColumn: "span 2" }}>
+                授業内容（任意）
+                <textarea name="description" rows={2} style={inputStyle} />
+              </label>
+            </div>
+            <p style={{ color: "#64748B", fontSize: 12, margin: "10px 0" }}>
+              選択した曜日・時限で学期中の講義を作成します。教室と受講者は作成後に割り当てできます。
+            </p>
+            <button type="submit" style={primaryButtonStyle}>授業を作成</button>
+          </>
+        )}
+      </form>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 24 }}>
         <article style={statCardStyle}>
@@ -125,9 +194,9 @@ export default async function TeacherLessonsPage() {
                           {course.school.name} ・ {course.enrollments.length}名の受講者
                         </p>
                       </div>
-                      <button type="button" style={secondaryButtonStyle}>
-                        詳細
-                      </button>
+                      <Link href={`/teacher/lessons/${course.id}`} style={secondaryButtonStyle}>
+                        管理・評価
+                      </Link>
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginTop: 16 }} className="course-meta">
@@ -141,7 +210,7 @@ export default async function TeacherLessonsPage() {
                       </div>
                       <div style={metaBoxStyle}>
                         <p style={metaLabelStyle}>教室</p>
-                        <p style={metaValueStyle}>{nextLesson?.room.name ?? "-"}</p>
+                        <p style={metaValueStyle}>{nextLesson?.room?.name ?? "-"}</p>
                       </div>
                       <div style={metaBoxStyle}>
                         <p style={metaLabelStyle}>課題提出</p>
@@ -181,7 +250,7 @@ export default async function TeacherLessonsPage() {
                     <div>
                       <p style={{ fontWeight: 600, marginBottom: 4 }}>{course.title}</p>
                       <p style={{ color: "#64748B", fontSize: 12 }}>
-                        {lesson.room.name}
+                        {lesson.room?.name ?? "教室未割り当て"}
                       </p>
                     </div>
                   </div>
@@ -197,6 +266,7 @@ export default async function TeacherLessonsPage() {
         }
         @media (max-width: 540px) {
           .course-meta { grid-template-columns: 1fr !important; }
+          .course-create-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </section>
@@ -251,15 +321,36 @@ const primaryButtonStyle: CSSProperties = {
   padding: "10px 14px",
   cursor: "pointer",
   fontWeight: 600,
+  textDecoration: "none",
 };
 
 const secondaryButtonStyle: CSSProperties = {
+  display: "inline-flex",
   border: "1px solid #CBD5E1",
   borderRadius: 8,
   background: "#FFFFFF",
   color: "#475569",
   padding: "7px 12px",
   cursor: "pointer",
+  textDecoration: "none",
+};
+
+const fieldLabelStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  color: "#475569",
+  fontSize: 13,
+  fontWeight: 600,
+};
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  border: "1px solid #CBD5E1",
+  borderRadius: 8,
+  background: "#FFFFFF",
+  padding: "9px 10px",
+  color: "#0F172A",
+  font: "inherit",
 };
 
 const metaBoxStyle: CSSProperties = {

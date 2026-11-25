@@ -29,6 +29,7 @@ model User {
   enrollments         Enrollment[]
   lessonAttendances   LessonAttendance[]
   submissions         Submission[]
+  courseEvaluations   CourseEvaluation[]
   notifications       Notification[]
   sentMessages        Message[]            @relation("SentMessages")
   conversationMembers ConversationMember[]
@@ -103,13 +104,15 @@ model Course {
   description  String?
   termId       String  @map("term_id")
 
-  instructor    User           @relation("InstructorCourses", fields: [instructorId], references: [id])
-  school        School         @relation(fields: [schoolId], references: [id])
-  term          Term           @relation(fields: [termId], references: [id])
-  enrollments   Enrollment[]
-  lessons       Lesson[]
-  assignments   Assignment[]
-  conversations Conversation[]
+  instructor             User               @relation("InstructorCourses", fields: [instructorId], references: [id])
+  school                 School             @relation(fields: [schoolId], references: [id])
+  term                   Term               @relation(fields: [termId], references: [id])
+  enrollments            Enrollment[]
+  lessons                Lesson[]
+  assignments            Assignment[]
+  conversations          Conversation[]
+  evaluations            CourseEvaluation[]
+  evaluationsPublishedAt DateTime?          @map("evaluations_published_at")
 
   @@index([schoolId, termId])
   @@index([instructorId])
@@ -119,13 +122,13 @@ model Course {
 model Lesson {
   id          String   @id @default(cuid())
   courseId    String   @map("course_id")
-  roomId      String   @map("room_id")
+  roomId      String?  @map("room_id")
   date        DateTime @db.Date
   period      Int
   description String?
 
   course            Course             @relation(fields: [courseId], references: [id])
-  room              Room               @relation(fields: [roomId], references: [id])
+  room              Room?              @relation(fields: [roomId], references: [id], onDelete: SetNull)
   lessonAttendances LessonAttendance[]
 
   @@unique([roomId, date, period])
@@ -144,6 +147,21 @@ model Enrollment {
 
   @@unique([userId, courseId])
   @@map("enrollments")
+}
+
+model CourseEvaluation {
+  id        String   @id @default(cuid())
+  courseId  String   @map("course_id")
+  studentId String   @map("student_id")
+  score     Int
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  course  Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  student User   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, studentId])
+  @@index([studentId])
+  @@map("course_evaluations")
 }
 
 enum AttendanceStatus {

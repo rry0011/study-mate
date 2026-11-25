@@ -40,7 +40,7 @@ export async function getTimetable(from: Date, to: Date) {
     startTime: slotMap.get(lesson.period)?.startTime,
     endTime: slotMap.get(lesson.period)?.endTime,
     courseTitle: lesson.course.title,
-    room: lesson.room.name,
+    room: lesson.room?.name ?? "教室未割り当て",
     attendance: lesson.lessonAttendances[0]?.status ?? null,
   }));
 }
