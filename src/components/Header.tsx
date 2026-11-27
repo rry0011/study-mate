@@ -2,48 +2,18 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { markAllNotificationsRead, markNotificationRead } from "@/app/(dashboard)/notifications/actions";
+import type { NotificationItem } from "@/src/types/notifications";
 
-type Notification = {
-  id: string;
-  type: "assignment" | "message" | "achievement";
-  title: string;
-  body: string;
-  time: string;
-  read: boolean;
-};
-
-const notifications: Notification[] = [
-  {
-    id: "1",
-    type: "assignment",
-    title: "課題の締め切りが近づいています",
-    body: "「React Hooks 演習」の提出期限は明日です",
-    time: "30分前",
-    read: false,
-  },
-  {
-    id: "2",
-    type: "achievement",
-    title: "バッジを獲得しました 🎉",
-    body: "「7日間連続学習」達成おめでとうございます！",
-    time: "2時間前",
-    read: false,
-  },
-  {
-    id: "3",
-    type: "message",
-    title: "講師からのフィードバック",
-    body: "第3章の課題にコメントが届いています",
-    time: "昨日",
-    read: true,
-  },
-];
-
-const notificationIcon = (type: Notification["type"]) => {
+const notificationIcon = (type: NotificationItem["type"]) => {
   const styles = {
-    assignment: { bg: "#EEF2FF", color: "#6366F1" },
-    message: { bg: "#F0FDF4", color: "#22C55E" },
-    achievement: { bg: "#FFFBEB", color: "#F59E0B" },
+    ASSIGNMENT: { bg: "#EEF2FF", color: "#6366F1" },
+    DEADLINE: { bg: "#FFF7ED", color: "#EA580C" },
+    OVERDUE: { bg: "#FEF2F2", color: "#DC2626" },
+    LESSON: { bg: "#EFF6FF", color: "#2563EB" },
+    MESSAGE: { bg: "#F0FDF4", color: "#22C55E" },
+    ACHIEVEMENT: { bg: "#FFFBEB", color: "#F59E0B" },
   };
   const s = styles[type];
   return (
@@ -60,18 +30,24 @@ const notificationIcon = (type: Notification["type"]) => {
         flexShrink: 0,
       }}
     >
-      {type === "assignment" && (
+      {(type === "ASSIGNMENT" || type === "DEADLINE" || type === "OVERDUE") && (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
           <polyline points="14 2 14 8 20 8" />
         </svg>
       )}
-      {type === "message" && (
+      {type === "LESSON" && (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <path d="M16 2v4M8 2v4M3 10h18" />
+        </svg>
+      )}
+      {type === "MESSAGE" && (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
       )}
-      {type === "achievement" && (
+      {type === "ACHIEVEMENT" && (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="8" r="7" />
           <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88" />
@@ -83,15 +59,57 @@ const notificationIcon = (type: Notification["type"]) => {
 
 type HeaderProps = {
   onMenuClick: () => void;
+  notifications: NotificationItem[];
 };
 
-export default function Header({ onMenuClick }: HeaderProps) {
+export default function Header({ onMenuClick, notifications: initialNotifications }: HeaderProps) {
+  const router = useRouter();
   const [searchFocused, setSearchFocused] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const [notifOpen, setNotifOpen] = useState(false);
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const [hiddenNotificationIds, setHiddenNotificationIds] = useState<string[]>([]);
+  const [notificationError, setNotificationError] = useState("");
+  const notifications = initialNotifications.filter(
+    (notification) => !hiddenNotificationIds.includes(notification.id),
+  );
+  const unreadCount = notifications.length;
 
   const notifRef = useRef<HTMLDivElement>(null);
+
+  async function handleNotificationClick(notification: NotificationItem, navigate = true) {
+    setNotificationError("");
+    setHiddenNotificationIds((current) => [...current, notification.id]);
+    try {
+      const href = await markNotificationRead(notification.id);
+      setNotifOpen(false);
+      if (navigate && href) router.push(href);
+    } catch {
+      setHiddenNotificationIds((current) => current.filter((id) => id !== notification.id));
+      setNotificationError("お知らせを既読にできませんでした。もう一度お試しください。");
+    }
+  }
+
+  async function handleMarkAllRead() {
+    const ids = notifications.map(({ id }) => id);
+    setNotificationError("");
+    setHiddenNotificationIds((current) => [...current, ...ids]);
+    try {
+      await markAllNotificationsRead();
+    } catch {
+      setHiddenNotificationIds((current) => current.filter((id) => !ids.includes(id)));
+      setNotificationError("お知らせを既読にできませんでした。もう一度お試しください。");
+    }
+  }
+
+  function formatNotificationTime(value: string) {
+    return new Intl.DateTimeFormat("ja-JP", {
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Asia/Tokyo",
+    }).format(new Date(value));
+  }
   useEffect(() => {
     if (!notifOpen) return;
     const handler = (e: MouseEvent) => {
@@ -322,15 +340,22 @@ export default function Header({ onMenuClick }: HeaderProps) {
               <span
                 style={{
                   position: "absolute",
-                  top: "6px",
-                  right: "6px",
-                  width: "8px",
-                  height: "8px",
+                  top: "2px",
+                  right: "0",
+                  minWidth: "16px",
+                  height: "16px",
+                  padding: "0 4px",
                   background: "#EF4444",
-                  borderRadius: "50%",
+                  borderRadius: "999px",
                   border: "2px solid white",
+                  color: "white",
+                  fontSize: "9px",
+                  fontWeight: 700,
+                  lineHeight: "12px",
                 }}
-              />
+              >
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
             )}
           </button>
 
@@ -342,6 +367,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
                 top: "calc(100% + 8px)",
                 right: 0,
                 width: "340px",
+                maxWidth: "calc(100vw - 24px)",
                 background: "white",
                 borderRadius: "12px",
                 border: "1px solid #E2E8F0",
@@ -363,43 +389,62 @@ export default function Header({ onMenuClick }: HeaderProps) {
                   お知らせ
                 </span>
                 {unreadCount > 0 && (
-                  <button style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "'Inter', sans-serif", fontSize: "12px", color: "#6366F1", fontWeight: 500 }}>
+                  <button
+                    onClick={() => void handleMarkAllRead()}
+                    style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "'Inter', sans-serif", fontSize: "12px", color: "#6366F1", fontWeight: 500 }}
+                  >
                     すべて既読にする
                   </button>
                 )}
               </div>
-              {notifications.map((n) => (
+              {notificationError && (
+                <p role="alert" style={{ color: "#B91C1C", fontSize: 12, padding: "8px 16px" }}>
+                  {notificationError}
+                </p>
+              )}
+              {notifications.length === 0 ? (
+                <p style={{ color: "#64748B", fontSize: 13, padding: "20px 16px", textAlign: "center" }}>
+                  未読のお知らせはありません。
+                </p>
+              ) : notifications.map((n) => (
                 <div
                   key={n.id}
                   style={{
                     display: "flex",
                     gap: "12px",
                     padding: "12px 16px",
-                    background: n.read ? "white" : "#FAFBFF",
+                    background: "#FAFBFF",
                     borderBottom: "1px solid #F1F5F9",
-                    cursor: "pointer",
                   }}
                 >
                   {notificationIcon(n.type)}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ margin: "0 0 2px", fontFamily: "'Inter', sans-serif", fontSize: "13px", fontWeight: n.read ? 400 : 600, color: "#0F172A" }}>
+                  <button
+                    onClick={() => void handleNotificationClick(n)}
+                    style={{ flex: 1, minWidth: 0, padding: 0, border: 0, textAlign: "left", background: "transparent", cursor: "pointer" }}
+                  >
+                    <p style={{ margin: "0 0 2px", fontFamily: "'Inter', sans-serif", fontSize: "13px", fontWeight: 600, color: "#0F172A" }}>
                       {n.title}
                     </p>
                     <p style={{ margin: "0 0 4px", fontFamily: "'Inter', sans-serif", fontSize: "12px", color: "#64748B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {n.body}
                     </p>
                     <p style={{ margin: 0, fontFamily: "'Inter', sans-serif", fontSize: "11px", color: "#94A3B8" }}>
-                      {n.time}
+                      {formatNotificationTime(n.createdAt)}
                     </p>
-                  </div>
-                  {!n.read && (
-                    <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#6366F1", flexShrink: 0, marginTop: "6px" }} />
-                  )}
+                  </button>
+                  <button
+                    onClick={() => void handleNotificationClick(n, false)}
+                    aria-label="お知らせを既読にして閉じる"
+                    title="既読にする"
+                    style={{ alignSelf: "flex-start", background: "none", border: 0, color: "#94A3B8", cursor: "pointer", fontSize: 18, lineHeight: 1 }}
+                  >
+                    ×
+                  </button>
                 </div>
               ))}
               <div style={{ padding: "10px 16px" }}>
                 <Link href="/notifications" style={{ fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "#6366F1", textDecoration: "none", fontWeight: 500 }}>
-                  すべて見る →
+                  お知らせ一覧を開く →
                 </Link>
               </div>
             </div>

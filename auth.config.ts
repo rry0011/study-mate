@@ -17,7 +17,8 @@ export default {
       const isLoggedIn = !!auth?.user;
       const isPublic =
         nextUrl.pathname.startsWith("/login") ||
-        nextUrl.pathname.startsWith("/api/auth");
+        nextUrl.pathname.startsWith("/api/auth") ||
+        nextUrl.pathname === "/api/notifications/cron";
 
       if (isPublic) return true;
       if (isLoggedIn) return true;

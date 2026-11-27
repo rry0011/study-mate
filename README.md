@@ -20,6 +20,12 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Notifications
+
+The header shows the latest unread notifications. Clicking one or dismissing it marks it read and removes it from the header; read items remain available in the notification history.
+
+To send deadline reminders and overdue notices, configure `CRON_SECRET` and invoke `POST /api/notifications/cron` with `Authorization: Bearer <CRON_SECRET>` from a scheduler every hour. Students with an unsubmitted assignment receive one reminder within 24 hours of its deadline. The assigned instructor receives one overdue notice per student after the deadline.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { formatNotificationDate, insertNotifications } from "@/src/lib/notifications";
 import { prisma } from "@/src/lib/prisma";
 import { requireRole } from "@/src/lib/session";
 
@@ -23,6 +24,31 @@ function getToday() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
+function formatLessonDate(date: Date) {
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function lessonNotificationData(
+  recipients: { userId: string }[],
+  title: string,
+  body: string,
+  dedupeKey: string,
+) {
+  return recipients.map(({ userId }) => ({
+    userId,
+    type: "LESSON" as const,
+    title,
+    body,
+    href: "/timetable",
+    dedupeKey: `${dedupeKey}:${userId}`,
+  }));
+}
+
 async function getManagedCourse(courseId: string) {
   const session = await requireRole("INSTRUCTOR", "ADMIN");
   const course = await prisma.course.findUnique({
@@ -31,6 +57,7 @@ async function getManagedCourse(courseId: string) {
       id: true,
       instructorId: true,
       schoolId: true,
+      title: true,
       term: { select: { startDate: true, endDate: true } },
       evaluationsPublishedAt: true,
     },
@@ -139,6 +166,12 @@ export async function updateEnrollments(formData: FormData) {
   if (eligibleStudents.length !== selectedIds.length) {
     throw new Error("所属学校の学生以外は受講者に設定できません。");
   }
+  const previousEnrollments = await prisma.enrollment.findMany({
+    where: { courseId },
+    select: { userId: true },
+  });
+  const previousIds = new Set(previousEnrollments.map(({ userId }) => userId));
+  const newlyEnrolledIds = selectedIds.filter((userId) => !previousIds.has(userId));
 
   await prisma.$transaction(async (transaction) => {
     await transaction.enrollment.deleteMany({ where: { courseId } });
@@ -152,7 +185,44 @@ export async function updateEnrollments(formData: FormData) {
     } else {
       await transaction.courseEvaluation.deleteMany({ where: { courseId } });
     }
+    if (newlyEnrolledIds.length > 0) {
+      const assignments = await transaction.assignment.findMany({
+        where: { courseId },
+        select: { id: true, title: true, dueAt: true },
+      });
+      await insertNotifications(
+        transaction,
+        newlyEnrolledIds.flatMap((userId) =>
+          assignments.map((assignment) => ({
+            userId,
+            type: "ASSIGNMENT" as const,
+            title: "受講授業に課題があります",
+            body: `${course.title}「${assignment.title}」の提出期限は${formatNotificationDate(assignment.dueAt)}です。`,
+            href: `/assignments/${assignment.id}`,
+            dedupeKey: `assignment:${assignment.id}:assigned:${userId}`,
+          })),
+        ),
+      );
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      const upcomingLessonCount = await transaction.lesson.count({
+        where: { courseId, date: { gte: today } },
+      });
+      if (upcomingLessonCount > 0) {
+        await insertNotifications(
+          transaction,
+          newlyEnrolledIds.map((userId) => ({
+            userId,
+            type: "LESSON" as const,
+            title: "受講授業の予定を確認してください",
+            body: `${course.title}の受講登録が完了しました。授業予定を確認できます。`,
+            href: "/timetable",
+          })),
+        );
+      }
+    }
   });
+  if (newlyEnrolledIds.length > 0) revalidatePath("/", "layout");
   revalidatePath(`/teacher/lessons/${courseId}`);
   revalidatePath(`/teacher/lessons/${courseId}/evaluations`);
 }
@@ -180,10 +250,32 @@ export async function updateLesson(formData: FormData) {
     if (!room) throw new Error("所属学校の教室を選択してください。");
   }
 
-  await prisma.lesson.update({
-    where: { id: lessonId },
-    data: { date, period, roomId: roomId || null },
+  const scheduleChanged =
+    lesson.date.getTime() !== date.getTime() || lesson.period !== period;
+  await prisma.$transaction(async (transaction) => {
+    await transaction.lesson.update({
+      where: { id: lessonId },
+      data: { date, period, roomId: roomId || null },
+    });
+    if (scheduleChanged) {
+      const recipients = await transaction.enrollment.findMany({
+        where: { courseId, user: { role: "STUDENT" } },
+        select: { userId: true },
+      });
+      const oldSchedule = `${formatLessonDate(lesson.date)} 第${lesson.period}時限`;
+      const newSchedule = `${formatLessonDate(date)} 第${period}時限`;
+      await insertNotifications(
+        transaction,
+        lessonNotificationData(
+          recipients,
+          "授業日時が変更されました",
+          `${course.title}の授業が${oldSchedule}から${newSchedule}に変更されました。`,
+          `lesson-updated:${lesson.id}:${crypto.randomUUID()}`,
+        ),
+      );
+    }
   });
+  if (scheduleChanged) revalidatePath("/", "layout");
   revalidatePath(`/teacher/lessons/${courseId}`);
   revalidatePath("/teacher/lessons");
   revalidatePath("/timetable");
@@ -201,9 +293,26 @@ export async function createLesson(formData: FormData) {
     throw new Error("有効な時限を選択してください。");
   }
 
-  await prisma.lesson.create({
-    data: { courseId, date, period, roomId: null },
+  await prisma.$transaction(async (transaction) => {
+    const lesson = await transaction.lesson.create({
+      data: { courseId, date, period, roomId: null },
+      select: { id: true },
+    });
+    const recipients = await transaction.enrollment.findMany({
+      where: { courseId, user: { role: "STUDENT" } },
+      select: { userId: true },
+    });
+    await insertNotifications(
+      transaction,
+      lessonNotificationData(
+        recipients,
+        "授業が追加されました",
+        `${course.title}に${formatLessonDate(date)} 第${period}時限の授業が追加されました。`,
+        `lesson-added:${lesson.id}`,
+      ),
+    );
   });
+  revalidatePath("/", "layout");
   revalidatePath(`/teacher/lessons/${courseId}`);
   revalidatePath("/teacher/lessons");
   revalidatePath("/timetable");
@@ -212,13 +321,28 @@ export async function createLesson(formData: FormData) {
 export async function deleteLesson(formData: FormData) {
   const courseId = formString(formData, "courseId");
   const lessonId = formString(formData, "lessonId");
-  await getManagedCourse(courseId);
+  const { course } = await getManagedCourse(courseId);
   const lesson = await prisma.lesson.findFirst({ where: { id: lessonId, courseId } });
   if (!lesson) throw new Error("講義が見つかりません。");
   await prisma.$transaction(async (transaction) => {
     await transaction.lessonAttendance.deleteMany({ where: { lessonId } });
-    await transaction.lesson.deleteMany({ where: { id: lessonId, courseId } });
+    const deleted = await transaction.lesson.deleteMany({ where: { id: lessonId, courseId } });
+    if (deleted.count === 0) throw new Error("講義はすでに削除されています。");
+    const recipients = await transaction.enrollment.findMany({
+      where: { courseId, user: { role: "STUDENT" } },
+      select: { userId: true },
+    });
+    await insertNotifications(
+      transaction,
+      lessonNotificationData(
+        recipients,
+        "授業が取り消されました",
+        `${course.title}の${formatLessonDate(lesson.date)} 第${lesson.period}時限の授業が取り消されました。`,
+        `lesson-cancelled:${lesson.id}`,
+      ),
+    );
   });
+  revalidatePath("/", "layout");
   revalidatePath(`/teacher/lessons/${courseId}`);
   revalidatePath("/teacher/lessons");
   revalidatePath("/timetable");

@@ -3,17 +3,20 @@
 import { useEffect, useState } from "react";
 import Header from "@/src/components/Header";
 import Sidebar from "@/src/components/Sidebar";
+import type { NotificationItem } from "@/src/types/notifications";
 
 const MOBILE_BREAKPOINT = 768;
 
 type DashboardShellProps = {
   children: React.ReactNode;
   role?: "STUDENT" | "INSTRUCTOR" | "ADMIN";
+  notifications: NotificationItem[];
 };
 
 export default function DashboardShell({
   children,
   role,
+  notifications,
 }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -37,7 +40,10 @@ export default function DashboardShell({
         background: "#F8FAFC",
       }}
     >
-      <Header onMenuClick={() => setSidebarOpen((current) => !current)} />
+      <Header
+        onMenuClick={() => setSidebarOpen((current) => !current)}
+        notifications={notifications}
+      />
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <Sidebar

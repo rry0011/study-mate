@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { parseAssignmentDueAt } from "@/src/lib/assignment-date";
+import { formatNotificationDate, insertNotifications } from "@/src/lib/notifications";
 import { prisma } from "@/src/lib/prisma";
 import { requireRole } from "@/src/lib/session";
 
@@ -67,7 +68,22 @@ async function getManagedAssignment(assignmentId: string) {
     where: session.user.role === "ADMIN"
       ? { id: assignmentId }
       : { id: assignmentId, course: { instructorId: session.user.id } },
-    select: { id: true, courseId: true },
+    select: {
+      id: true,
+      courseId: true,
+      title: true,
+      description: true,
+      dueAt: true,
+      course: {
+        select: {
+          title: true,
+          enrollments: {
+            where: { user: { role: "STUDENT" } },
+            select: { userId: true },
+          },
+        },
+      },
+    },
   });
   if (!assignment) throw new Error("課題が見つからないか、管理する権限がありません。");
   return assignment;
@@ -88,13 +104,35 @@ export async function createAssignment(formData: FormData) {
     where: session.user.role === "ADMIN"
       ? { id: courseId }
       : { id: courseId, instructorId: session.user.id },
-    select: { id: true },
+    select: {
+      id: true,
+      title: true,
+      enrollments: {
+        where: { user: { role: "STUDENT" } },
+        select: { userId: true },
+      },
+    },
   });
   if (!course) throw new Error("担当する授業を選択してください。");
 
-  const assignment = await prisma.assignment.create({
-    data: { courseId, title, description: description || null, dueAt },
+  const assignment = await prisma.$transaction(async (transaction) => {
+    const created = await transaction.assignment.create({
+      data: { courseId, title, description: description || null, dueAt },
+    });
+    await insertNotifications(
+      transaction,
+      course.enrollments.map(({ userId }) => ({
+        userId,
+        type: "ASSIGNMENT",
+        title: "新しい課題が割り当てられました",
+        body: `${course.title}「${title}」の提出期限は${formatNotificationDate(dueAt)}です。`,
+        href: `/assignments/${created.id}`,
+        dedupeKey: `assignment:${created.id}:assigned:${userId}`,
+      })),
+    );
+    return created;
   });
+  revalidatePath("/", "layout");
   revalidatePath("/assignments");
   revalidatePath("/teacher/assignments");
   redirect(`/assignments/${assignment.id}`);
@@ -111,10 +149,29 @@ export async function updateAssignment(formData: FormData) {
   if (description.length > 10000) throw new Error("課題の説明は10,000文字以内で入力してください。");
   if (!dueAt) throw new Error("提出期限を正しく入力してください。");
 
-  await prisma.assignment.update({
-    where: { id: assignment.id },
-    data: { title, description: description || null, dueAt },
+  const changed =
+    assignment.title !== title ||
+    assignment.dueAt.getTime() !== dueAt.getTime() ||
+    (assignment.description ?? "") !== description;
+  await prisma.$transaction(async (transaction) => {
+    await transaction.assignment.update({
+      where: { id: assignment.id },
+      data: { title, description: description || null, dueAt },
+    });
+    if (changed) {
+      await insertNotifications(
+        transaction,
+        assignment.course.enrollments.map(({ userId }) => ({
+          userId,
+          type: "ASSIGNMENT",
+          title: "課題が更新されました",
+          body: `${assignment.course.title}「${title}」の内容または提出期限が更新されました。期限: ${formatNotificationDate(dueAt)}`,
+          href: `/assignments/${assignment.id}`,
+        })),
+      );
+    }
   });
+  if (changed) revalidatePath("/", "layout");
   revalidatePath("/assignments");
   revalidatePath(`/assignments/${assignment.id}`);
   revalidatePath("/teacher/assignments");
@@ -189,18 +246,28 @@ export async function returnSubmission(formData: FormData) {
 
   const submission = await prisma.submission.findFirst({
     where: { id: submissionId, assignmentId: assignment.id },
-    select: { id: true },
+    select: { id: true, userId: true },
   });
   if (!submission) throw new Error("提出物が見つかりません。");
 
-  await prisma.submission.update({
-    where: { id: submission.id },
-    data: {
-      status: "GRADED",
-      score: scoreText ? Number(scoreText) : null,
-      feedback: feedback || null,
-    },
+  await prisma.$transaction(async (transaction) => {
+    await transaction.submission.update({
+      where: { id: submission.id },
+      data: {
+        status: "GRADED",
+        score: scoreText ? Number(scoreText) : null,
+        feedback: feedback || null,
+      },
+    });
+    await insertNotifications(transaction, [{
+      userId: submission.userId,
+      type: "ASSIGNMENT",
+      title: "課題が返却されました",
+      body: `${assignment.course.title}「${assignment.title}」の課題が返却されました。`,
+      href: `/assignments/${assignment.id}`,
+    }]);
   });
+  revalidatePath("/", "layout");
   revalidatePath(`/assignments/${assignment.id}`);
   revalidatePath("/assignments");
   revalidatePath("/teacher/assignments");
